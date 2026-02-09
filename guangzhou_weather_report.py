@@ -15,6 +15,13 @@ from datetime import datetime, timedelta
 import math
 
 try:
+    from scipy import stats as scipy_stats
+    HAS_SCIPY = True
+except ImportError:
+    HAS_SCIPY = False
+    scipy_stats = None
+
+try:
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
@@ -50,6 +57,7 @@ except ImportError:
     _CHINESE_FONT = None
 
 API_URL = "https://archive-api.open-meteo.com/v1/archive"
+FORECAST_URL = "https://api.open-meteo.com/v1/forecast"
 PARAMS = {
     "latitude": 23.1291,
     "longitude": 113.2644,
@@ -64,6 +72,57 @@ def fetch_data():
     query = urllib.parse.urlencode(PARAMS)
     with urllib.request.urlopen(f"{API_URL}?{query}") as resp:
         return json.loads(resp.read().decode())
+
+
+def fetch_forecast_16d():
+    """获取未来 16 天预报（含今天），用于今日温度与未来 15 天预告"""
+    params = {
+        "latitude": PARAMS["latitude"],
+        "longitude": PARAMS["longitude"],
+        "daily": "temperature_2m_max,temperature_2m_min,temperature_2m_mean",
+        "timezone": PARAMS["timezone"],
+        "forecast_days": 16,
+    }
+    query = urllib.parse.urlencode(params)
+    with urllib.request.urlopen(f"{FORECAST_URL}?{query}") as resp:
+        return json.loads(resp.read().decode())
+
+
+def fetch_last_30d():
+    """获取最近 30 天历史数据（用于趋势图）"""
+    end = datetime.now().date()
+    start = end - timedelta(days=29)
+    params = {
+        "latitude": PARAMS["latitude"],
+        "longitude": PARAMS["longitude"],
+        "start_date": start.isoformat(),
+        "end_date": end.isoformat(),
+        "daily": "temperature_2m_max,temperature_2m_min,temperature_2m_mean",
+        "timezone": PARAMS["timezone"],
+    }
+    query = urllib.parse.urlencode(params)
+    with urllib.request.urlopen(f"{API_URL}?{query}") as resp:
+        return json.loads(resp.read().decode())
+
+
+def _temp_advice(temp_min: float, temp_max: float) -> str:
+    """根据今日温度范围给出简要建议"""
+    low, high = float(temp_min), float(temp_max)
+    if high >= 35:
+        return "高温天气，注意防暑降温、减少户外活动，多补水。"
+    if high >= 30:
+        return "天气较热，注意防晒与补水，午后尽量减少暴晒。"
+    if low >= 25 and high >= 28:
+        return "体感偏热，适宜短袖，注意通风。"
+    if low >= 18 and high <= 28:
+        return "气温适宜，早晚可加薄外套，注意增减衣物。"
+    if low >= 10 and high <= 22:
+        return "早晚偏凉，建议穿长袖或薄外套。"
+    if low >= 0 and high <= 15:
+        return "天气较冷，注意保暖，外出加衣。"
+    if low < 0:
+        return "严寒天气，注意防寒保暖，尽量减少户外停留。"
+    return "注意根据体感增减衣物。"
 
 
 def to_dataframe(raw):
@@ -123,6 +182,35 @@ def analyze_2025(df):
     }
 
 
+def _trend_significance(years, means):
+    """
+    对年均温做线性回归 year ~ mean，检验斜率是否显著不为 0。
+    返回 slope_per_year, stderr, p_value, ci_low, ci_high, 以及 0.1 是否落在 95% CI 内。
+    若无 scipy 或 n<3，返回 None 表示未做检验。
+    """
+    if not HAS_SCIPY or len(years) < 3:
+        return None
+    years = [float(y) for y in years]
+    means = [float(m) for m in means]
+    res = scipy_stats.linregress(years, means)
+    n = len(years)
+    df = n - 2
+    t_crit = scipy_stats.t.ppf(0.975, df)
+    se = res.stderr  # 斜率标准误
+    ci_low = res.slope - t_crit * se
+    ci_high = res.slope + t_crit * se
+    return {
+        "slope_per_year": round(float(res.slope), 4),
+        "stderr": float(se),
+        "p_value": float(res.pvalue),
+        "ci_low": round(ci_low, 4),
+        "ci_high": round(ci_high, 4),
+        "significant": bool(res.pvalue < 0.05),
+        "trend_01_in_ci": bool(ci_low <= 0.1 <= ci_high),
+        "r_squared": round(float(res.rvalue) ** 2, 4),
+    }
+
+
 def analyze_10years(df):
     """近 10 年天气分析"""
     by_year = df.groupby("year").agg(
@@ -133,15 +221,16 @@ def analyze_10years(df):
         temp_min_min=("temp_min", "min"),
         days=("date", "count"),
     ).round(2)
-    # 简单线性趋势（年均温）
     years = by_year.index.astype(int).values
     means = by_year["temp_mean_mean"].values
+    # 趋势：回归斜率（°C/年）与显著性
+    trend_sig = _trend_significance(years.tolist(), means.tolist())
     if len(years) >= 2:
         slope = (means[-1] - means[0]) / (years[-1] - years[0])
         trend_per_decade = round(slope * 10, 2)
     else:
         trend_per_decade = 0
-    return {
+    out = {
         "by_year": {str(k): v.to_dict() for k, v in by_year.iterrows()},
         "trend_per_decade_c": trend_per_decade,
         "overall": {
@@ -150,6 +239,9 @@ def analyze_10years(df):
             "temp_mean_mean": round(float(df["temp_mean"].mean()), 2),
         },
     }
+    if trend_sig is not None:
+        out["trend_test"] = trend_sig
+    return out
 
 
 def get_abnormal_days(df, high_pct=95, low_pct=5):
@@ -177,17 +269,41 @@ def get_abnormal_days(df, high_pct=95, low_pct=5):
     }
 
 
-def predict_2026(df):
-    """2026 年预测：使用 2016-2025 各月均值作为 2026 年月度预测（含轻微升温趋势）"""
+def predict_2026(df, years_10=None):
+    """
+    2026 年预测：基于 2016-2025 各月均值，叠加由线性回归估计的年际趋势（统计技能：数据驱动 + 95% CI）。
+    若 years_10 含 trend_test，则采用回归斜率 β（°C/年）作为 2025→2026 的偏移；否则采用参考值 0.1°C/年。
+    """
     by_month = df.groupby("month").agg(
         temp_max_avg=("temp_max", "mean"),
         temp_min_avg=("temp_min", "mean"),
         temp_mean_avg=("temp_mean", "mean"),
     ).round(2)
-    # 可选：加 0.1°C/年 的升温
-    trend = 0.1
-    pred = {}
     month_names = "1月,2月,3月,4月,5月,6月,7月,8月,9月,10月,11月,12月".split(",")
+
+    trend = 0.1  # 默认参考值（无回归时使用）
+    method = "基于 2016-2025 年月均值，并叠加约 +0.1°C 年际升温趋势（参考值；未做回归估计）。"
+    trend_from_regression = False
+
+    if years_10 and years_10.get("trend_test"):
+        t = years_10["trend_test"]
+        # 2025→2026 仅 1 年，偏移 = 斜率 × 1
+        trend = t["slope_per_year"]
+        ci_low, ci_high = t["ci_low"], t["ci_high"]
+        p = t["p_value"]
+        trend_from_regression = True
+        if p < 0.05:
+            method = (
+                f"基于 2016-2025 年月均值，叠加线性回归估计的年际趋势：β = {trend:.3f}°C/年，"
+                f"95% CI [{ci_low:.3f}, {ci_high:.3f}]，p = {p:.3f}（显著）。"
+            )
+        else:
+            method = (
+                f"基于 2016-2025 年月均值，叠加线性回归估计的年际趋势：β = {trend:.3f}°C/年，"
+                f"95% CI [{ci_low:.3f}, {ci_high:.3f}]，p = {p:.3f}（不显著，预测中仍采用该估计值供参考）。"
+            )
+
+    pred = {}
     for m in range(1, 13):
         row = by_month.loc[m]
         pred[str(m)] = {
@@ -197,8 +313,10 @@ def predict_2026(df):
             "temp_min": round(float(row["temp_min_avg"]) + trend, 1),
         }
     return {
-        "method": "基于 2016-2025 年月均值，并叠加约 +0.1°C 年际升温趋势",
+        "method": method,
         "by_month": pred,
+        "trend_offset_per_year": round(trend, 4),
+        "trend_from_regression": trend_from_regression,
     }
 
 
@@ -261,9 +379,10 @@ def _outlook_2026(df, pred):
     }
 
 
-def build_report_data(df):
-    pred = predict_2026(df)
-    return {
+def build_report_data(df, today_weather=None, last_30d=None, forecast_15d=None, yesterday_weather=None):
+    years_10 = analyze_10years(df)
+    pred = predict_2026(df, years_10)
+    out = {
         "meta": {
             "title": "广州天气数据报告",
             "period": "2016-01-01 至 2025-12-31",
@@ -271,11 +390,18 @@ def build_report_data(df):
             "generated": datetime.now().strftime("%Y-%m-%d %H:%M"),
         },
         "year_2025": analyze_2025(df),
-        "years_10": analyze_10years(df),
+        "years_10": years_10,
         "abnormal": get_abnormal_days(df),
         "predict_2026": pred,
         "outlook_2026": _outlook_2026(df, pred),
     }
+    if today_weather is not None:
+        out["today_weather"] = today_weather
+    if yesterday_weather is not None:
+        out["yesterday_weather"] = yesterday_weather
+    if forecast_15d is not None:
+        out["forecast_15d"] = forecast_15d
+    return out
 
 
 def _render_charts_base64(report):
@@ -429,7 +555,23 @@ def _chart_data(report):
         chart_2026_daily["max"] = [float(x["temp_max"]) for x in pred_daily]
         chart_2026_daily["min"] = [float(x["temp_min"]) for x in pred_daily]
         chart_2026_daily["mean"] = [float(x["temp_mean"]) for x in pred_daily]
-    return {"chart_2025_daily": chart_2025_daily, "chart_2025": chart_2025, "chart_10y": chart_10y, "chart_ab": chart_ab, "chart_2026": chart_2026, "chart_2026_daily": chart_2026_daily}
+    # 未来 15 天预告（含今天共 16 天）
+    chart_forecast = {"labels": [], "max": [], "min": [], "mean": []}
+    if report.get("forecast_15d"):
+        for x in report["forecast_15d"]:
+            chart_forecast["labels"].append(x["date"])
+            chart_forecast["max"].append(float(x["temp_max"]))
+            chart_forecast["min"].append(float(x["temp_min"]))
+            chart_forecast["mean"].append(float(x["temp_mean"]))
+    return {
+        "chart_2025_daily": chart_2025_daily,
+        "chart_2025": chart_2025,
+        "chart_10y": chart_10y,
+        "chart_ab": chart_ab,
+        "chart_2026": chart_2026,
+        "chart_2026_daily": chart_2026_daily,
+        "chart_forecast": chart_forecast,
+    }
 
 
 def _tables_html(chart_data):
@@ -461,6 +603,62 @@ def _tables_html(chart_data):
         rows = "".join(f"<tr><td>{c['labels'][i]}</td><td>{c['max'][i]}</td><td>{c['mean'][i]}</td><td>{c['min'][i]}</td></tr>" for i in range(len(c["labels"])))
         parts.append(f'<div class="data-table-wrap"><h3>五、2026 年预测（月均温）</h3><table class="data-table"><thead><tr><th>月份</th><th>预测最高温（°C）</th><th>预测平均温（°C）</th><th>预测最低温（°C）</th></tr></thead><tbody>{rows}</tbody></table></div>')
     return "".join(parts)
+
+
+def _section_today_and_trends(r, deg):
+    """报告最前：今日/昨日温度与建议、未来 15 天预告（打开页面时按当前日期加载）"""
+    parts = []
+    today = r.get("today_weather")
+    yesterday = r.get("yesterday_weather")
+    if today:
+        yesterday_line = ""
+        if yesterday:
+            yesterday_line = f"\n      <p class=\"summary\"><strong>昨日（{yesterday['date']}）温度范围：</strong> {yesterday['temp_min']}{deg}C ~ {yesterday['temp_max']}{deg}C</p>"
+        parts.append(f"""
+    <section class="highlight-section">
+      <h2>今日天气与近期预告</h2>
+      <p id="today-summary"><strong>今日（{today["date"]}）温度范围：</strong> {today["temp_min"]}{deg}C ~ {today["temp_max"]}{deg}C</p>{yesterday_line}
+      <p class="summary" id="today-advice"><strong>温度建议：</strong>{today["advice"]}</p>
+      <h3 class="chart-subtitle">今日逐时温度预告</h3>
+      <p class="summary" id="hourly-today-note">打开页面时自动加载当前日期的逐时预报，悬停可看具体时刻与温度。</p>
+      <div id="hourly-today-wrap" class="chart-wrap chart-daily" style="min-height: 200px;">
+        <p id="hourly-loading" class="summary">正在加载今日逐时温度…</p>
+        <canvas id="chart-hourly-today" aria-label="今日逐时气温" style="display: none;"></canvas>
+      </div>
+    </section>""")
+    parts.append("""
+    <section>
+      <h3 class="chart-subtitle">未来 15 天天气预告</h3>
+      <p id="forecast-loading" class="summary">正在加载当前日期的未来 15 天预报…</p>
+      <div class="chart-wrap chart-daily" id="wrap-forecast" style="display: none;"><canvas id="chart-forecast" aria-label="未来15天预报"></canvas></div>
+      <p class="summary">打开页面时自动按当前日期更新，数据来源：Open-Meteo Forecast API。</p>
+    </section>""")
+    return "\n".join(parts) if parts else ""
+
+def _trend_sig_text(y10):
+    """近 10 年趋势显著性说明（用于第二节）"""
+    t = y10.get("trend_test")
+    if not t:
+        return "（趋势显著性检验需 scipy；安装后重新生成报告即可显示：pip install scipy。）"
+    p = t["p_value"]
+    slope = t["slope_per_year"]
+    ci_low, ci_high = t["ci_low"], t["ci_high"]
+    if p < 0.05:
+        return f"经线性回归检验，2016－2025 年年均温随时间呈显著上升趋势（斜率 {slope:.3f}°C/年，95% CI [{ci_low:.3f}, {ci_high:.3f}]，p = {p:.3f}）。"
+    return f"经线性回归检验，2016－2025 年年均温随时间的变化在统计上不显著（斜率 {slope:.3f}°C/年，95% CI [{ci_low:.3f}, {ci_high:.3f}]，p = {p:.3f}）。"
+
+
+def _trend_01_note(y10, pred):
+    """说明 2026 预测采用的趋势是否来自回归估计及统计学含义（用于第四节）"""
+    if pred.get("trend_from_regression"):
+        t = y10.get("trend_test")
+        if t and t["p_value"] < 0.05:
+            return "预测采用由 2016－2025 年年均温线性回归得到的斜率估计（见第二节），95% CI 已在上文给出，趋势在统计上显著。"
+        return "预测采用回归估计的斜率供参考；该年际趋势在 2016－2025 年数据中不显著（p ≥ 0.05），结果仅供定性参考。"
+    t = y10.get("trend_test")
+    if not t:
+        return "预测采用参考值 +0.1°C/年；安装 scipy 后重新生成报告可改为基于回归估计的斜率。"
+    return "预测采用参考值；本节方法说明中已给出回归估计的斜率与 95% CI，可与数据对照。"
 
 
 def render_html(report):
@@ -495,6 +693,7 @@ def render_html(report):
     header h1 {{ font-size: 1.75rem; font-weight: 700; margin: 0 0 0.5rem; color: var(--text); }}
     header p {{ color: var(--muted); font-size: 0.95rem; margin: 0; }}
     section {{ background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 1.5rem; margin-bottom: 2rem; }}
+    section.highlight-section {{ border-color: var(--accent); background: linear-gradient(135deg, rgba(26,35,50,0.98) 0%%, rgba(30,45,65,0.95) 100%%); }}
     section h2 {{ font-size: 1.2rem; font-weight: 600; margin: 0 0 1rem; color: var(--accent); }}
     .chart-wrap {{ margin: 1rem 0; position: relative; height: 280px; }}
     .chart-wrap.chart-daily {{ height: 320px; }}
@@ -512,6 +711,11 @@ def render_html(report):
     .data-table th, .data-table td {{ padding: 0.4rem 0.6rem; text-align: left; border: 1px solid var(--border); }}
     .data-table th {{ background: rgba(48,54,61,0.5); color: var(--muted); }}
     .data-table tbody tr:hover td {{ background: rgba(88,166,255,0.08); }}
+    .report-module {{ margin-bottom: 3rem; }}
+    .report-module-title {{ font-size: 1.35rem; font-weight: 700; color: var(--text); margin: 0 0 1.25rem; padding-bottom: 0.75rem; border-bottom: 2px solid var(--accent); }}
+    .charts-row {{ display: flex; gap: 1rem; margin: 1rem 0; flex-wrap: wrap; }}
+    .charts-row .chart-cell {{ flex: 1 1 45%; min-width: 280px; }}
+    .charts-row .chart-cell .chart-wrap {{ height: 280px; }}
   </style>
 </head>
 <body>
@@ -524,8 +728,15 @@ def render_html(report):
       <button type="button" class="btn-download" id="btn-download-report" data-filename-xlsx="广州天气报告_表格数据_{m["generated"].replace(" ", "_").replace(":", "-")[:16]}.xlsx" aria-label="下载表格数据">下载表格数据</button>
     </header>
 
+    <div class="report-module">
+      <h2 class="report-module-title">一、近期天气与预告</h2>
+      {_section_today_and_trends(r, deg)}
+    </div>
+
+    <div class="report-module">
+      <h2 class="report-module-title">二、历史与年度分析</h2>
     <section>
-      <h2>一、2025 年天气情况</h2>
+      <h2>1. 2025 年天气情况</h2>
       <p>2025 年共 <strong>{y25.get("days", 0)}</strong> 天。年均：最高温 {y25.get("desc", {}).get("temp_max", {}).get("mean", "-")}{deg}C，最低温 {y25.get("desc", {}).get("temp_min", {}).get("mean", "-")}{deg}C，平均温 {y25.get("desc", {}).get("temp_mean", {}).get("mean", "-")}{deg}C。</p>
       <p>年度极值：最高温日 <span class="highlight">{y25.get("highest_day", {}).get("date", "-")}</span>（{y25.get("highest_day", {}).get("temp_max", "-")}{deg}C），最低温日 <span class="highlight">{y25.get("lowest_day", {}).get("date", "-")}</span>（{y25.get("lowest_day", {}).get("temp_min", "-")}{deg}C）。</p>
       <div class="chart-wrap chart-daily"><canvas id="chart-2025-daily" aria-label="2025年逐日气温"></canvas></div>
@@ -533,20 +744,22 @@ def render_html(report):
     </section>
 
     <section>
-      <h2>二、近 10 年天气趋势（2016－2025）</h2>
+      <h2>2. 近 10 年天气趋势（2016－2025）</h2>
       <p>近 10 年日均最高温均值 <strong>{y10.get("overall", {}).get("temp_max_mean", "-")}{deg}C</strong>，最低温均值 <strong>{y10.get("overall", {}).get("temp_min_mean", "-")}{deg}C</strong>，平均温 <strong>{y10.get("overall", {}).get("temp_mean_mean", "-")}{deg}C</strong>。年均温趋势约 <strong>{y10.get("trend_per_decade_c", 0)}{deg}C/10 年</strong>。</p>
+      <p class="summary">{_trend_sig_text(y10)}</p>
       <div class="chart-wrap"><canvas id="chart-10y" aria-label="近10年气温趋势"></canvas></div>
     </section>
 
     <section>
-      <h2>三、异常天气（高温/低温异常天数）</h2>
+      <h2>3. 异常天气（高温/低温异常天数）</h2>
       <p>高温异常：日最高温 ≥ {ab["threshold_high_c"]}{deg}C（95% 分位），共 <strong>{len(ab["high_days"])}</strong> 天；低温异常：日最低温 ≤ {ab["threshold_low_c"]}{deg}C（5% 分位），共 <strong>{len(ab["low_days"])}</strong> 天。</p>
       <div class="chart-wrap"><canvas id="chart-ab" aria-label="异常天气天数"></canvas></div>
     </section>
 
     <section>
-      <h2>四、2026 年预测（月均温）</h2>
+      <h2>4. 2026 年预测（月均温）</h2>
       <p class="summary"><em>{pred["method"]}</em></p>
+      <p class="summary">{_trend_01_note(y10, pred)}</p>
       <h3 class="chart-subtitle">每日温度预测</h3>
       <p class="summary">下图为由月均温插值得到的 2026 年逐日温度预测，悬停可看具体日期与数值。</p>
       <div class="chart-wrap chart-daily"><canvas id="chart-2026-daily" aria-label="2026年逐日预测"></canvas></div>
@@ -556,11 +769,12 @@ def render_html(report):
     </section>
 
     <section>
-      <h2>五、2026 年冬夏季展望</h2>
+      <h2>5. 2026 年冬夏季展望</h2>
       <p><strong>冬季（2025/26 冬）：</strong>{r.get("outlook_2026", {}).get("winter", "—")}。</p>
       <p><strong>夏季（2026 年夏）：</strong>{r.get("outlook_2026", {}).get("summer", "—")}。</p>
       <p class="summary">{r.get("outlook_2026", {}).get("note", "")}</p>
     </section>
+    </div>
 
     <footer>
       <p>数据来源：Open-Meteo Archive API · 广州 · Asia/Shanghai</p>
@@ -579,6 +793,12 @@ def render_html(report):
         var filename = (btn.getAttribute("data-filename-xlsx") || "广州天气报告_表格数据.xlsx").replace(/[/\\\\:*?\"<>|]/g, "_");
         if (typeof XLSX !== "undefined") {{
           var wb = XLSX.utils.book_new();
+          if (d.chart_forecast && d.chart_forecast.labels && d.chart_forecast.labels.length) {{
+            var arr = [["日期", "预报最高温(°C)", "预报平均温(°C)", "预报最低温(°C)"]];
+            for (var i = 0; i < d.chart_forecast.labels.length; i++)
+              arr.push([d.chart_forecast.labels[i], d.chart_forecast.max[i], d.chart_forecast.mean[i], d.chart_forecast.min[i]]);
+            wb.SheetNames.push("未来15天"); wb.Sheets["未来15天"] = XLSX.utils.aoa_to_sheet(arr);
+          }}
           if (d.chart_2025_daily && d.chart_2025_daily.labels && d.chart_2025_daily.labels.length) {{
             var arr = [["日期", "日最高温(°C)", "日平均温(°C)", "日最低温(°C)"]];
             for (var i = 0; i < d.chart_2025_daily.labels.length; i++)
@@ -618,25 +838,29 @@ def render_html(report):
             var b = rows.map(function(row) {{ return "<tr>" + row.map(function(cell) {{ return "<td>" + escapeHtml(cell) + "</td>"; }}).join("") + "</tr>"; }}).join("");
             return "<section class=\\"data-section\\"><h2>" + escapeHtml(title) + "</h2><table><thead>" + h + "</thead><tbody>" + b + "</tbody></table></section>";
           }}
+          if (d.chart_forecast && d.chart_forecast.labels && d.chart_forecast.labels.length) {{
+            var rows = d.chart_forecast.labels.map(function(_, i) {{ return [d.chart_forecast.labels[i], d.chart_forecast.max[i], d.chart_forecast.mean[i], d.chart_forecast.min[i]]; }});
+            parts.push(tableSection("一、未来 15 天预报", ["日期", "预报最高温（°C）", "预报平均温（°C）", "预报最低温（°C）"], rows));
+          }}
           if (d.chart_2025_daily && d.chart_2025_daily.labels && d.chart_2025_daily.labels.length) {{
             var rows = d.chart_2025_daily.labels.map(function(_, i) {{ return [d.chart_2025_daily.labels[i], d.chart_2025_daily.max[i], d.chart_2025_daily.mean[i], d.chart_2025_daily.min[i]]; }});
-            parts.push(tableSection("一、2025 年逐日气温", ["日期", "日最高温（°C）", "日平均温（°C）", "日最低温（°C）"], rows));
+            parts.push(tableSection("二、2025 年逐日气温", ["日期", "日最高温（°C）", "日平均温（°C）", "日最低温（°C）"], rows));
           }}
           if (d.chart_2025 && d.chart_2025.labels && d.chart_2025.labels.length) {{
             var rows = d.chart_2025.labels.map(function(_, i) {{ return [d.chart_2025.labels[i], d.chart_2025.max[i], d.chart_2025.mean[i], d.chart_2025.min[i]]; }});
-            parts.push(tableSection("二、2025 年月度气温", ["月份", "月均最高温（°C）", "月均平均温（°C）", "月均最低温（°C）"], rows));
+            parts.push(tableSection("三、2025 年月度气温", ["月份", "月均最高温（°C）", "月均平均温（°C）", "月均最低温（°C）"], rows));
           }}
           if (d.chart_10y && d.chart_10y.labels && d.chart_10y.labels.length) {{
             var rows = d.chart_10y.labels.map(function(_, i) {{ return [d.chart_10y.labels[i], d.chart_10y.max[i], d.chart_10y.mean[i], d.chart_10y.min[i]]; }});
-            parts.push(tableSection("三、近 10 年气温趋势（2016－2025）", ["年份", "年均最高温（°C）", "年均平均温（°C）", "年均最低温（°C）"], rows));
+            parts.push(tableSection("四、近 10 年气温趋势（2016－2025）", ["年份", "年均最高温（°C）", "年均平均温（°C）", "年均最低温（°C）"], rows));
           }}
           if (d.chart_ab && d.chart_ab.labels && d.chart_ab.labels.length) {{
             var rows = d.chart_ab.labels.map(function(_, i) {{ return [d.chart_ab.labels[i], d.chart_ab.high[i], d.chart_ab.low[i]]; }});
-            parts.push(tableSection("四、异常天气（高温/低温异常天数）", ["年份", "高温异常（天）", "低温异常（天）"], rows));
+            parts.push(tableSection("五、异常天气（高温/低温异常天数）", ["年份", "高温异常（天）", "低温异常（天）"], rows));
           }}
           if (d.chart_2026 && d.chart_2026.labels && d.chart_2026.labels.length) {{
             var rows = d.chart_2026.labels.map(function(_, i) {{ return [d.chart_2026.labels[i], d.chart_2026.max[i], d.chart_2026.mean[i], d.chart_2026.min[i]]; }});
-            parts.push(tableSection("五、2026 年预测（月均温）", ["月份", "预测最高温（°C）", "预测平均温（°C）", "预测最低温（°C）"], rows));
+            parts.push(tableSection("六、2026 年预测（月均温）", ["月份", "预测最高温（°C）", "预测平均温（°C）", "预测最低温（°C）"], rows));
           }}
           var tablePage = "<!DOCTYPE html><html lang=\\"zh-CN\\"><head><meta charset=\\"UTF-8\\"><title>广州天气报告 - 表格数据</title><style>" +
             "body {{ margin:0; font-family: -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Microsoft YaHei', sans-serif; background: #0f1419; color: #e6edf3; padding: 2rem; }} " +
@@ -667,13 +891,19 @@ def render_html(report):
     }});
   }}
 
+  // Visualization-expert: Clarity, Honesty, Simplicity, Accessibility (colorblind-friendly palette)
+  var palette = {{ high: "#e65c2b", mean: "#0173b2", low: "#029e73" }};
+  var paletteRgba = {{ high: "rgba(230,92,43,0.15)", mean: "rgba(1,115,178,0.15)", low: "rgba(2,158,115,0.15)" }};
+  var gridColor = "rgba(48,54,61,0.4)";
+  var tickColor = "#8b949e";
+
   var opts = {{
     responsive: true,
     maintainAspectRatio: false,
-    color: "#8b949e",
-    font: {{ family: "'PingFang SC', 'Microsoft YaHei', sans-serif", size: 11 }},
+    color: tickColor,
+    font: {{ family: "'PingFang SC', 'Microsoft YaHei', sans-serif", size: 12 }},
     plugins: {{
-      legend: {{ position: "top", labels: {{ usePointStyle: true, padding: 14 }} }},
+      legend: {{ position: "top", labels: {{ usePointStyle: true, padding: 12, boxWidth: 12 }} }},
       tooltip: {{
         backgroundColor: "#1a2332",
         titleColor: "#e6edf3",
@@ -692,35 +922,78 @@ def render_html(report):
       }}
     }},
     scales: {{
-      x: {{ grid: {{ color: "#30363d" }}, ticks: {{ maxRotation: 45 }} }},
-      y: {{ grid: {{ color: "#30363d" }} }}
+      x: {{ grid: {{ display: false }}, ticks: {{ maxRotation: 45, color: tickColor, font: {{ size: 11 }} }} }},
+      y: {{
+        grid: {{ color: gridColor, drawBorder: false }},
+        ticks: {{ color: tickColor, font: {{ size: 11 }}, stepSize: 5 }},
+        title: {{ display: true, text: "温度 (" + deg + ")", color: tickColor, font: {{ size: 11 }} }}
+      }}
     }}
   }};
 
   function lineDatasets(labels, max, mean, min, pointRadius) {{
-    pointRadius = pointRadius ?? 4;
+    pointRadius = pointRadius ?? 5;
     return [
-      {{ label: labels[0], data: max, borderColor: "#f85149", backgroundColor: "rgba(248,81,73,0.1)", tension: 0.2, pointRadius: pointRadius }},
-      {{ label: labels[1], data: mean, borderColor: "#58a6ff", backgroundColor: "rgba(88,166,255,0.1)", tension: 0.2, pointRadius: pointRadius }},
-      {{ label: labels[2], data: min, borderColor: "#3fb950", backgroundColor: "rgba(63,185,80,0.1)", tension: 0.2, pointRadius: pointRadius }}
+      {{ label: labels[0], data: max, borderColor: palette.high, backgroundColor: paletteRgba.high, borderWidth: 2, tension: 0.25, pointRadius: pointRadius, pointHoverRadius: 7 }},
+      {{ label: labels[1], data: mean, borderColor: palette.mean, backgroundColor: paletteRgba.mean, borderWidth: 2, tension: 0.25, pointRadius: pointRadius, pointHoverRadius: 7 }},
+      {{ label: labels[2], data: min, borderColor: palette.low, backgroundColor: paletteRgba.low, borderWidth: 2, tension: 0.25, pointRadius: pointRadius, pointHoverRadius: 7 }}
     ];
   }}
+
+  function renderLineChart(canvasId, chartData, optsOverride) {{
+    if (!chartData || !chartData.labels || chartData.labels.length === 0) return;
+    var el = document.getElementById(canvasId);
+    if (!el) return;
+    var o = Object.assign({{}}, opts, optsOverride || {{}});
+    new Chart(el, {{ type: "line", data: {{ labels: chartData.labels, datasets: lineDatasets(["最高温", "平均温", "最低温"], chartData.max, chartData.mean, chartData.min, 3) }}, options: o }});
+  }}
+
+  // 未来 15 天：打开页面时按当前日期请求并绘制
+  (function loadForecast15() {{
+    var forecastUrl = "https://api.open-meteo.com/v1/forecast?latitude=23.1291&longitude=113.2644&daily=temperature_2m_max,temperature_2m_min,temperature_2m_mean&timezone=Asia/Shanghai&forecast_days=16";
+    fetch(forecastUrl).then(function(r) {{ return r.json(); }})
+      .then(function(fc) {{
+        var cFc = {{ labels: [], max: [], min: [], mean: [] }};
+        if (fc.daily && fc.daily.time) {{
+          for (var j = 0; j < fc.daily.time.length; j++) {{
+            cFc.labels.push(fc.daily.time[j]);
+            cFc.max.push(fc.daily.temperature_2m_max[j]);
+            cFc.min.push(fc.daily.temperature_2m_min[j]);
+            cFc.mean.push(fc.daily.temperature_2m_mean[j]);
+          }};
+        }};
+        data.chart_forecast = cFc;
+        var loadingFc = document.getElementById("forecast-loading");
+        var wrapFc = document.getElementById("wrap-forecast");
+        if (cFc.labels.length) {{
+          if (loadingFc) loadingFc.style.display = "none";
+          if (wrapFc) wrapFc.style.display = "block";
+          var canvasFc = document.getElementById("chart-forecast");
+          if (canvasFc) {{
+            var existingFc = typeof Chart !== "undefined" && Chart.getChart(canvasFc);
+            if (existingFc) existingFc.destroy();
+            renderLineChart("chart-forecast", cFc, {{ interaction: {{ intersect: false, mode: "index" }}, scales: {{ x: {{ grid: {{ display: false }}, ticks: {{ maxTicksLimit: 16, maxRotation: 45, color: tickColor }} }}, y: {{ grid: {{ color: gridColor }}, ticks: {{ color: tickColor, stepSize: 5 }}, title: {{ display: true, text: "温度 (" + deg + ")", color: tickColor, font: {{ size: 11 }} }} }} }} }});
+          }};
+        }} else {{ if (loadingFc) loadingFc.textContent = "暂无未来 15 天预报"; }}
+      }})
+      .catch(function() {{ var loadingFc = document.getElementById("forecast-loading"); if (loadingFc) loadingFc.textContent = "加载失败，请刷新或检查网络"; }});
+  }})();
 
   var c25daily = data.chart_2025_daily;
   if (c25daily && c25daily.labels && c25daily.labels.length) {{
     var dailyCanvas = document.getElementById("chart-2025-daily");
     var dailyCtx = dailyCanvas.getContext("2d");
     var dailyH = 320;
-    var gradMax = dailyCtx.createLinearGradient(0, 0, 0, dailyH);
-    gradMax.addColorStop(0, "rgba(248,81,73,0.22)"); gradMax.addColorStop(1, "rgba(248,81,73,0)");
-    var gradMean = dailyCtx.createLinearGradient(0, 0, 0, dailyH);
-    gradMean.addColorStop(0, "rgba(88,166,255,0.22)"); gradMean.addColorStop(1, "rgba(88,166,255,0)");
-    var gradMin = dailyCtx.createLinearGradient(0, 0, 0, dailyH);
-    gradMin.addColorStop(0, "rgba(63,185,80,0.22)"); gradMin.addColorStop(1, "rgba(63,185,80,0)");
+    var gH = dailyCtx.createLinearGradient(0, 0, 0, dailyH);
+    gH.addColorStop(0, "rgba(230,92,43,0.2)"); gH.addColorStop(1, "rgba(230,92,43,0)");
+    var gM = dailyCtx.createLinearGradient(0, 0, 0, dailyH);
+    gM.addColorStop(0, "rgba(1,115,178,0.2)"); gM.addColorStop(1, "rgba(1,115,178,0)");
+    var gL = dailyCtx.createLinearGradient(0, 0, 0, dailyH);
+    gL.addColorStop(0, "rgba(2,158,115,0.2)"); gL.addColorStop(1, "rgba(2,158,115,0)");
     var dailyDatasets = [
-      {{ label: "日最高温", data: c25daily.max, borderColor: "#f85149", backgroundColor: gradMax, borderWidth: 2, fill: true, tension: 0.35, pointRadius: 0, pointHoverRadius: 6, hitRadius: 12, pointHoverBorderWidth: 2, pointHoverBackgroundColor: "#f85149" }},
-      {{ label: "日平均温", data: c25daily.mean, borderColor: "#58a6ff", backgroundColor: gradMean, borderWidth: 2, fill: true, tension: 0.35, pointRadius: 0, pointHoverRadius: 6, hitRadius: 12, pointHoverBorderWidth: 2, pointHoverBackgroundColor: "#58a6ff" }},
-      {{ label: "日最低温", data: c25daily.min, borderColor: "#3fb950", backgroundColor: gradMin, borderWidth: 2, fill: true, tension: 0.35, pointRadius: 0, pointHoverRadius: 6, hitRadius: 12, pointHoverBorderWidth: 2, pointHoverBackgroundColor: "#3fb950" }}
+      {{ label: "日最高温", data: c25daily.max, borderColor: palette.high, backgroundColor: gH, borderWidth: 2, fill: true, tension: 0.35, pointRadius: 0, pointHoverRadius: 6, hitRadius: 12, pointHoverBackgroundColor: palette.high }},
+      {{ label: "日平均温", data: c25daily.mean, borderColor: palette.mean, backgroundColor: gM, borderWidth: 2, fill: true, tension: 0.35, pointRadius: 0, pointHoverRadius: 6, hitRadius: 12, pointHoverBackgroundColor: palette.mean }},
+      {{ label: "日最低温", data: c25daily.min, borderColor: palette.low, backgroundColor: gL, borderWidth: 2, fill: true, tension: 0.35, pointRadius: 0, pointHoverRadius: 6, hitRadius: 12, pointHoverBackgroundColor: palette.low }}
     ];
     var dailyOpts = Object.assign({{}}, opts, {{
       interaction: {{ intersect: false, mode: "index" }},
@@ -733,15 +1006,11 @@ def render_html(report):
         }})
       }}),
       scales: {{
-        x: {{ grid: {{ display: false }}, ticks: {{ maxTicksLimit: 14, maxRotation: 45, color: "#8b949e", font: {{ size: 11 }} }} }},
-        y: {{ grid: {{ color: "rgba(48,54,61,0.5)" }}, ticks: {{ color: "#8b949e", font: {{ size: 11 }}, stepSize: 5 }} }}
+        x: {{ grid: {{ display: false }}, ticks: {{ maxTicksLimit: 14, maxRotation: 45, color: tickColor, font: {{ size: 11 }} }} }},
+        y: {{ grid: {{ color: gridColor }}, ticks: {{ color: tickColor, font: {{ size: 11 }}, stepSize: 5 }}, title: {{ display: true, text: "温度 (" + deg + ")", color: tickColor, font: {{ size: 11 }} }} }}
       }}
     }});
-    new Chart(dailyCanvas, {{
-      type: "line",
-      data: {{ labels: c25daily.labels, datasets: dailyDatasets }},
-      options: dailyOpts
-    }});
+    new Chart(dailyCanvas, {{ type: "line", data: {{ labels: c25daily.labels, datasets: dailyDatasets }}, options: dailyOpts }});
   }}
 
   var c25 = data.chart_2025;
@@ -769,12 +1038,15 @@ def render_html(report):
       data: {{
         labels: cab.labels,
         datasets: [
-          {{ label: "高温异常", data: cab.high, backgroundColor: "rgba(248,81,73,0.8)", borderColor: "#f85149", borderWidth: 1 }},
-          {{ label: "低温异常", data: cab.low, backgroundColor: "rgba(88,166,255,0.8)", borderColor: "#58a6ff", borderWidth: 1 }}
+          {{ label: "高温异常", data: cab.high, backgroundColor: "rgba(230,92,43,0.85)", borderColor: palette.high, borderWidth: 1 }},
+          {{ label: "低温异常", data: cab.low, backgroundColor: "rgba(1,115,178,0.85)", borderColor: palette.mean, borderWidth: 1 }}
         ]
       }},
       options: Object.assign({{}}, opts, {{
-        scales: {{ x: {{ grid: {{ display: false }}, ticks: {{ maxRotation: 45 }} }}, y: {{ grid: {{ color: "#30363d" }}, ticks: {{ stepSize: 1 }} }} }}
+        scales: {{
+          x: {{ grid: {{ display: false }}, ticks: {{ maxRotation: 45, color: tickColor }} }},
+          y: {{ grid: {{ color: gridColor }}, ticks: {{ stepSize: 1, color: tickColor }}, title: {{ display: true, text: "天数", color: tickColor, font: {{ size: 11 }} }} }}
+        }}
       }})
     }});
   }}
@@ -785,16 +1057,16 @@ def render_html(report):
     if (canvas2026d) {{
       var ctx2026d = canvas2026d.getContext("2d");
       var h = 320;
-      var gMax = ctx2026d.createLinearGradient(0, 0, 0, h);
-      gMax.addColorStop(0, "rgba(248,81,73,0.22)"); gMax.addColorStop(1, "rgba(248,81,73,0)");
-      var gMean = ctx2026d.createLinearGradient(0, 0, 0, h);
-      gMean.addColorStop(0, "rgba(88,166,255,0.22)"); gMean.addColorStop(1, "rgba(88,166,255,0)");
-      var gMin = ctx2026d.createLinearGradient(0, 0, 0, h);
-      gMin.addColorStop(0, "rgba(63,185,80,0.22)"); gMin.addColorStop(1, "rgba(63,185,80,0)");
+      var gH26 = ctx2026d.createLinearGradient(0, 0, 0, h);
+      gH26.addColorStop(0, "rgba(230,92,43,0.2)"); gH26.addColorStop(1, "rgba(230,92,43,0)");
+      var gM26 = ctx2026d.createLinearGradient(0, 0, 0, h);
+      gM26.addColorStop(0, "rgba(1,115,178,0.2)"); gM26.addColorStop(1, "rgba(1,115,178,0)");
+      var gL26 = ctx2026d.createLinearGradient(0, 0, 0, h);
+      gL26.addColorStop(0, "rgba(2,158,115,0.2)"); gL26.addColorStop(1, "rgba(2,158,115,0)");
       var ds2026d = [
-        {{ label: "预测最高温", data: c26daily.max, borderColor: "#f85149", backgroundColor: gMax, borderWidth: 2, fill: true, tension: 0.35, pointRadius: 0, pointHoverRadius: 6, hitRadius: 12, pointHoverBorderWidth: 2, pointHoverBackgroundColor: "#f85149" }},
-        {{ label: "预测平均温", data: c26daily.mean, borderColor: "#58a6ff", backgroundColor: gMean, borderWidth: 2, fill: true, tension: 0.35, pointRadius: 0, pointHoverRadius: 6, hitRadius: 12, pointHoverBorderWidth: 2, pointHoverBackgroundColor: "#58a6ff" }},
-        {{ label: "预测最低温", data: c26daily.min, borderColor: "#3fb950", backgroundColor: gMin, borderWidth: 2, fill: true, tension: 0.35, pointRadius: 0, pointHoverRadius: 6, hitRadius: 12, pointHoverBorderWidth: 2, pointHoverBackgroundColor: "#3fb950" }}
+        {{ label: "预测最高温", data: c26daily.max, borderColor: palette.high, backgroundColor: gH26, borderWidth: 2, fill: true, tension: 0.35, pointRadius: 0, pointHoverRadius: 6, hitRadius: 12, pointHoverBackgroundColor: palette.high }},
+        {{ label: "预测平均温", data: c26daily.mean, borderColor: palette.mean, backgroundColor: gM26, borderWidth: 2, fill: true, tension: 0.35, pointRadius: 0, pointHoverRadius: 6, hitRadius: 12, pointHoverBackgroundColor: palette.mean }},
+        {{ label: "预测最低温", data: c26daily.min, borderColor: palette.low, backgroundColor: gL26, borderWidth: 2, fill: true, tension: 0.35, pointRadius: 0, pointHoverRadius: 6, hitRadius: 12, pointHoverBackgroundColor: palette.low }}
       ];
       var opts2026d = Object.assign({{}}, opts, {{
         interaction: {{ intersect: false, mode: "index" }},
@@ -806,7 +1078,10 @@ def render_html(report):
             }})
           }})
         }}),
-        scales: {{ x: {{ grid: {{ display: false }}, ticks: {{ maxTicksLimit: 14, maxRotation: 45 }} }}, y: {{ grid: {{ color: "#30363d" }} }} }}
+        scales: {{
+          x: {{ grid: {{ display: false }}, ticks: {{ maxTicksLimit: 14, maxRotation: 45, color: tickColor }} }},
+          y: {{ grid: {{ color: gridColor }}, ticks: {{ color: tickColor, stepSize: 5 }}, title: {{ display: true, text: "温度 (" + deg + ")", color: tickColor, font: {{ size: 11 }} }} }}
+        }}
       }});
       new Chart(canvas2026d, {{ type: "line", data: {{ labels: c26daily.labels, datasets: ds2026d }}, options: opts2026d }});
     }}
@@ -821,6 +1096,92 @@ def render_html(report):
     }});
   }}
 
+  // 今日逐时温度：每次打开页面自动请求当前日期的逐时预报并更新「今日」区块
+  (function loadHourlyToday() {{
+    var wrap = document.getElementById("hourly-today-wrap");
+    var loadingEl = document.getElementById("hourly-loading");
+    var canvasEl = document.getElementById("chart-hourly-today");
+    if (!wrap || !canvasEl) return;
+    var apiUrl = "https://api.open-meteo.com/v1/forecast?latitude=23.1291&longitude=113.2644&hourly=temperature_2m&timezone=Asia/Shanghai&forecast_days=2";
+    fetch(apiUrl)
+      .then(function(r) {{ return r.json(); }})
+      .then(function(res) {{
+        var h = res.hourly;
+        if (!h || !h.time || !h.temperature_2m) {{ if (loadingEl) loadingEl.textContent = "暂无逐时数据"; return; }}
+        var times = h.time;
+        var temps = h.temperature_2m;
+        var todayStr = times[0].slice(0, 10);
+        var todayIndices = [];
+        for (var i = 0; i < times.length; i++) {{
+          if (times[i].slice(0, 10) === todayStr) todayIndices.push(i);
+        }}
+        if (todayIndices.length === 0) {{ if (loadingEl) loadingEl.textContent = "今日逐时数据暂无"; return; }}
+        var labels = [];
+        var data = [];
+        for (var j = 0; j < todayIndices.length; j++) {{
+          var idx = todayIndices[j];
+          labels.push(times[idx].slice(11, 16));
+          data.push(Number(temps[idx].toFixed(1)));
+        }}
+        var tMin = Math.min.apply(null, data);
+        var tMax = Math.max.apply(null, data);
+        var summaryEl = document.getElementById("today-summary");
+        if (summaryEl) summaryEl.innerHTML = "<strong>今日（" + todayStr + "）温度范围：</strong> " + tMin + deg + " ~ " + tMax + deg;
+        var adviceEl = document.getElementById("today-advice");
+        if (adviceEl) {{
+          var advice = (tMax >= 35) ? "高温天气，注意防暑降温、减少户外活动，多补水。" :
+            (tMax >= 30) ? "天气较热，注意防晒与补水，午后尽量减少暴晒。" :
+            (tMin >= 18 && tMax <= 28) ? "气温适宜，早晚可加薄外套，注意增减衣物。" :
+            (tMin >= 10 && tMax <= 22) ? "早晚偏凉，建议穿长袖或薄外套。" :
+            (tMin >= 0 && tMax <= 15) ? "天气较冷，注意保暖，外出加衣。" :
+            (tMin < 0) ? "严寒天气，注意防寒保暖。" : "注意根据体感增减衣物。";
+          adviceEl.innerHTML = "<strong>温度建议：</strong>" + advice;
+        }}
+        if (loadingEl) loadingEl.style.display = "none";
+        canvasEl.style.display = "block";
+        new Chart(canvasEl, {{
+          type: "line",
+          data: {{
+            labels: labels,
+            datasets: [{{
+              label: "气温",
+              data: data,
+              borderColor: palette.mean,
+              backgroundColor: "rgba(1,115,178,0.2)",
+              borderWidth: 2,
+              fill: true,
+              tension: 0.3,
+              pointRadius: 2,
+              pointHoverRadius: 6
+            }}]
+          }},
+          options: {{
+            responsive: true,
+            maintainAspectRatio: false,
+            interaction: {{ intersect: false, mode: "index" }},
+            plugins: {{
+              legend: {{ display: false }},
+              tooltip: {{
+                backgroundColor: "#1a2332",
+                titleColor: "#e6edf3",
+                bodyColor: "#e6edf3",
+                borderColor: "#30363d",
+                callbacks: {{
+                  title: function(items) {{ return items.length ? todayStr + " " + (items[0].label || "") : ""; }},
+                  label: function(ctx) {{ return "温度：" + Number(ctx.parsed.y).toFixed(1) + deg; }}
+                }}
+              }}
+            }},
+            scales: {{
+              x: {{ grid: {{ display: false }}, ticks: {{ maxTicksLimit: 12, color: tickColor, font: {{ size: 10 }} }} }},
+              y: {{ grid: {{ color: gridColor }}, ticks: {{ color: tickColor, stepSize: 2 }}, title: {{ display: true, text: "温度 (" + deg + ")", color: tickColor, font: {{ size: 11 }} }} }}
+            }}
+          }}
+        }});
+      }})
+      .catch(function() {{ if (loadingEl) loadingEl.textContent = "加载失败，请刷新或检查网络"; }});
+  }})();
+
 }})();
   </script>
 </body>
@@ -834,8 +1195,71 @@ def main():
     df = to_dataframe(raw)
     print(f"已加载 {len(df)} 行")
 
+    today_weather = None
+    last_30d = None
+    forecast_15d = None
+    try:
+        print("获取今日与未来 15 天预报...")
+        fc = fetch_forecast_16d()
+        daily = fc.get("daily", {})
+        times = daily.get("time", [])
+        tmax = daily.get("temperature_2m_max", [])
+        tmin = daily.get("temperature_2m_min", [])
+        tmean = daily.get("temperature_2m_mean", [])
+        if times and len(times) >= 1:
+            temp_min = round(tmin[0], 1)
+            temp_max = round(tmax[0], 1)
+            today_weather = {
+                "date": times[0],
+                "temp_min": temp_min,
+                "temp_max": temp_max,
+                "advice": _temp_advice(temp_min, temp_max),
+            }
+        if len(times) >= 16:
+            forecast_15d = [
+                {"date": times[i], "temp_max": round(tmax[i], 1), "temp_min": round(tmin[i], 1), "temp_mean": round(tmean[i], 1)}
+                for i in range(16)
+            ]
+        else:
+            forecast_15d = [
+                {"date": times[i], "temp_max": round(tmax[i], 1), "temp_min": round(tmin[i], 1), "temp_mean": round(tmean[i], 1)}
+                for i in range(len(times))
+            ] if times else None
+    except Exception as e:
+        print(f"预报获取失败（将不显示今日与未来预告）: {e}")
+
+    yesterday_weather = None
+    try:
+        print("获取最近 2 天历史（用于昨日温度）...")
+        raw30 = fetch_last_30d()
+        daily30 = raw30.get("daily", {})
+        t30 = daily30.get("time", [])
+        if t30:
+            last_30d = [
+                {
+                    "date": t30[i],
+                    "temp_max": round(daily30["temperature_2m_max"][i], 1),
+                    "temp_min": round(daily30["temperature_2m_min"][i], 1),
+                    "temp_mean": round(daily30["temperature_2m_mean"][i], 1),
+                }
+                for i in range(len(t30))
+            ]
+            # 昨日 = 今日 - 1 天，从 last_30d 中取昨日数据
+            if today_weather:
+                today_str = today_weather["date"]
+                yesterday_dt = datetime.strptime(today_str, "%Y-%m-%d").date() - timedelta(days=1)
+                yesterday_str = yesterday_dt.strftime("%Y-%m-%d")
+            else:
+                yesterday_str = (datetime.now().date() - timedelta(days=1)).strftime("%Y-%m-%d")
+            for row in last_30d:
+                if row["date"] == yesterday_str:
+                    yesterday_weather = {"date": yesterday_str, "temp_min": row["temp_min"], "temp_max": row["temp_max"]}
+                    break
+    except Exception as e:
+        print(f"昨日数据获取失败（将不显示昨日温度）: {e}")
+
     print("生成报告数据...")
-    report = build_report_data(df)
+    report = build_report_data(df, today_weather=today_weather, yesterday_weather=yesterday_weather, forecast_15d=forecast_15d)
 
     out_dir = Path(__file__).parent
     json_path = out_dir / "guangzhou_weather_report_data.json"
