@@ -7,6 +7,7 @@
 import base64
 import io
 import json
+import os
 import urllib.request
 import urllib.parse
 import pandas as pd
@@ -661,8 +662,54 @@ def _trend_01_note(y10, pred):
     return "预测采用参考值；本节方法说明中已给出回归估计的斜率与 95% CI，可与数据对照。"
 
 
-def render_html(report):
-    """生成独立 HTML 报告，使用 Chart.js 可交互图表（悬停显示数据提示）"""
+def _report_context_for_llm(report):
+    """生成供大模型使用的报告摘要文本（自然语言查数上下文）"""
+    r = report
+    m = r.get("meta", {})
+    deg = "°C"
+    parts = [
+        f"报告：{m.get('title', '')}。{m.get('location', '')}，数据时段 {m.get('period', '')}，生成时间 {m.get('generated', '')}。"
+    ]
+    if r.get("today_weather"):
+        t = r["today_weather"]
+        parts.append(f"今日（{t.get('date')}）温度范围：{t.get('temp_min')}～{t.get('temp_max')}{deg}；穿衣建议：{t.get('advice', '')}")
+    if r.get("yesterday_weather"):
+        y = r["yesterday_weather"]
+        parts.append(f"昨日（{y.get('date')}）温度范围：{y.get('temp_min')}～{y.get('temp_max')}{deg}")
+    y25 = r.get("year_2025", {})
+    if y25:
+        desc = y25.get("desc", {})
+        parts.append(
+            f"2025年：共{y25.get('days', 0)}天；年均最高温{desc.get('temp_max', {}).get('mean', '-')}{deg}，"
+            f"最低温{desc.get('temp_min', {}).get('mean', '-')}{deg}，平均温{desc.get('temp_mean', {}).get('mean', '-')}{deg}。"
+        )
+        h, l = y25.get("highest_day", {}), y25.get("lowest_day", {})
+        parts.append(f"年度最高温日：{h.get('date', '-')}（{h.get('temp_max', '-')}{deg}）；最低温日：{l.get('date', '-')}（{l.get('temp_min', '-')}{deg}）。")
+    y10 = r.get("years_10", {})
+    if y10:
+        o = y10.get("overall", {})
+        parts.append(
+            f"近10年（2016-2025）：日均最高温均值{o.get('temp_max_mean', '-')}{deg}，"
+            f"最低温均值{o.get('temp_min_mean', '-')}{deg}，平均温{o.get('temp_mean_mean', '-')}{deg}；"
+            f"年均温趋势约{y10.get('trend_per_decade_c', '-')}{deg}/10年。"
+        )
+    ab = r.get("abnormal", {})
+    if ab:
+        parts.append(
+            f"异常天气定义：高温异常为日最高温≥{ab.get('threshold_high_c', '-')}{deg}（95%分位），共{len(ab.get('high_days', []))}天；"
+            f"低温异常为日最低温≤{ab.get('threshold_low_c', '-')}{deg}（5%分位），共{len(ab.get('low_days', []))}天。"
+        )
+    pred = r.get("predict_2026", {})
+    if pred:
+        parts.append(f"2026年预测方法：{pred.get('method', '')}。")
+    out = r.get("outlook_2026", {})
+    if out:
+        parts.append(f"2026年冬季展望：{out.get('winter', '')}；夏季展望：{out.get('summer', '')}。")
+    return "\n".join(parts)
+
+
+def render_html(report, chat_api_url=""):
+    """生成独立 HTML 报告，使用 Chart.js 可交互图表（悬停显示数据提示）。chat_api_url 为大模型问答接口，留空则仅用 FAQ。"""
     r = report
     m = r["meta"]
     y25 = r["year_2025"]
@@ -673,6 +720,9 @@ def render_html(report):
     tables_html = _tables_html(chart_data)
     # 嵌入页面供 JS 使用，避免 </script> 出现在字符串中
     chart_data_json = json.dumps(chart_data, ensure_ascii=False).replace("<", "\\u003c").replace(">", "\\u003e")
+    report_context_text = _report_context_for_llm(report)
+    report_context_json = json.dumps(report_context_text, ensure_ascii=False).replace("</", "\\u003c/")
+    chat_api_url_js = json.dumps(chat_api_url)
     deg = "&#176;"
 
     html = f"""<!DOCTYPE html>
@@ -715,7 +765,30 @@ def render_html(report):
     .report-module-title {{ font-size: 1.35rem; font-weight: 700; color: var(--text); margin: 0 0 1.25rem; padding-bottom: 0.75rem; border-bottom: 2px solid var(--accent); }}
     .charts-row {{ display: flex; gap: 1rem; margin: 1rem 0; flex-wrap: wrap; }}
     .charts-row .chart-cell {{ flex: 1 1 45%; min-width: 280px; }}
-    .charts-row .chart-cell .chart-wrap {{ height: 280px; }}
+    /* 智能客服聊天 */
+    #chat-widget {{ position: fixed; bottom: 1.5rem; right: 1.5rem; z-index: 9999; font-family: inherit; }}
+    #chat-toggle {{ width: 56px; height: 56px; border-radius: 50%; border: 2px solid var(--accent); background: var(--card); color: var(--accent); cursor: pointer; box-shadow: 0 4px 12px rgba(0,0,0,0.3); display: flex; align-items: center; justify-content: center; font-size: 1.5rem; transition: transform 0.2s, background 0.2s; }}
+    #chat-toggle:hover {{ background: rgba(88,166,255,0.2); transform: scale(1.05); }}
+    #chat-panel {{ display: none; position: absolute; bottom: 70px; right: 0; width: 360px; max-width: calc(100vw - 2rem); max-height: 480px; background: var(--card); border: 1px solid var(--border); border-radius: 12px; box-shadow: 0 8px 24px rgba(0,0,0,0.4); flex-direction: column; overflow: hidden; }}
+    #chat-panel.open {{ display: flex; }}
+    #chat-header {{ padding: 0.75rem 1rem; background: rgba(88,166,255,0.15); border-bottom: 1px solid var(--border); font-weight: 600; color: var(--accent); display: flex; align-items: center; justify-content: space-between; }}
+    #chat-close {{ background: none; border: none; color: var(--muted); cursor: pointer; font-size: 1.2rem; padding: 0 0.25rem; line-height: 1; }}
+    #chat-close:hover {{ color: var(--text); }}
+    #chat-messages {{ flex: 1; overflow-y: auto; padding: 1rem; min-height: 200px; max-height: 320px; }}
+    .chat-msg {{ margin-bottom: 0.75rem; max-width: 90%; }}
+    .chat-msg.bot {{ margin-right: auto; }}
+    .chat-msg.user {{ margin-left: auto; }}
+    .chat-msg .bubble {{ padding: 0.6rem 0.9rem; border-radius: 12px; font-size: 0.9rem; line-height: 1.5; }}
+    .chat-msg.bot .bubble {{ background: rgba(48,54,61,0.6); border: 1px solid var(--border); color: var(--text); }}
+    .chat-msg.user .bubble {{ background: rgba(88,166,255,0.2); border: 1px solid var(--accent); color: var(--text); }}
+    #chat-quick {{ padding: 0 1rem 0.5rem; display: flex; flex-wrap: wrap; gap: 0.4rem; }}
+    #chat-quick button {{ padding: 0.35rem 0.6rem; font-size: 0.8rem; color: var(--accent); background: rgba(88,166,255,0.12); border: 1px solid var(--border); border-radius: 8px; cursor: pointer; font-family: inherit; }}
+    #chat-quick button:hover {{ background: rgba(88,166,255,0.2); }}
+    #chat-form {{ display: flex; padding: 0.75rem 1rem; border-top: 1px solid var(--border); gap: 0.5rem; }}
+    #chat-input {{ flex: 1; padding: 0.5rem 0.75rem; border: 1px solid var(--border); border-radius: 8px; background: var(--bg); color: var(--text); font-size: 0.9rem; font-family: inherit; }}
+    #chat-input:focus {{ outline: none; border-color: var(--accent); }}
+    #chat-send {{ padding: 0.5rem 1rem; background: var(--accent); color: #0f1419; border: none; border-radius: 8px; font-weight: 600; cursor: pointer; font-family: inherit; font-size: 0.9rem; }}
+    #chat-send:hover {{ filter: brightness(1.1); }}
   </style>
 </head>
 <body>
@@ -1183,6 +1256,133 @@ def render_html(report):
   }})();
 
 }})();
+
+  </script>
+  <script type="application/json" id="report-context">{report_context_json}</script>
+  <!-- 智能客服：支持大模型自然语言查数，未配置 API 时使用 FAQ -->
+  <div id="chat-widget">
+    <button type="button" id="chat-toggle" aria-label="打开客服">💬</button>
+    <div id="chat-panel">
+      <div id="chat-header">报告小助手 <button type="button" id="chat-close" aria-label="关闭">×</button></div>
+      <div id="chat-messages"></div>
+      <div id="chat-quick"></div>
+      <form id="chat-form">
+        <input type="text" id="chat-input" placeholder="输入问题，例如：数据从哪来？" autocomplete="off" />
+        <button type="submit" id="chat-send">发送</button>
+      </form>
+    </div>
+  </div>
+  <script>
+(function() {{
+  var CHAT_API_URL = {chat_api_url_js};  // 大模型接口：留空则仅用 FAQ；部署到 Vercel 并设环境变量 CHAT_API_URL=/api/chat 时自动填入
+  var panel = document.getElementById("chat-panel");
+  var toggle = document.getElementById("chat-toggle");
+  var closeBtn = document.getElementById("chat-close");
+  var messages = document.getElementById("chat-messages");
+  var quick = document.getElementById("chat-quick");
+  var form = document.getElementById("chat-form");
+  var input = document.getElementById("chat-input");
+
+  var reportContext = "";
+  try {{
+    var ctxEl = document.getElementById("report-context");
+    if (ctxEl && ctxEl.textContent) reportContext = JSON.parse(ctxEl.textContent);
+  }} catch (e) {{}}
+
+  var faq = [
+    {{ keys: ["数据来源", "数据从哪", "哪来的", "open-meteo", "api"], answer: "本报告历史数据来自 Open-Meteo Archive API（广州站），今日与未来预报来自 Open-Meteo Forecast API。页面底部有数据来源说明。" }},
+    {{ keys: ["今日", "今天", "温度范围", "逐时"], answer: "报告顶部「今日天气与近期预告」中有今日温度范围与穿衣建议；「今日逐时温度预告」图会在打开页面时按当前日期加载逐时预报，悬停可看具体时刻与温度。" }},
+    {{ keys: ["昨日", "昨天"], answer: "在「今日天气与近期预告」区块中，今日温度下方会显示昨日（具体日期）的温度范围，便于对比。" }},
+    {{ keys: ["未来15天", "15天", "预报"], answer: "「未来 15 天天气预告」图表在打开页面时按当前日期自动加载，数据来自 Open-Meteo Forecast API，悬停可看每日温度。" }},
+    {{ keys: ["2025", "去年", "年度"], answer: "「二、历史与年度分析」下「2025 年天气情况」为 2025 年全年统计：年均最高温/最低温/平均温、年度极值日，以及逐日与月度气温图。" }},
+    {{ keys: ["近10年", "10年", "趋势", "线性回归", "p值", "显著性"], answer: "近 10 年趋势基于 2016－2025 年数据，用线性回归得到年均温变化（°C/10 年）。若 p < 0.05 表示趋势在统计上显著；p ≥ 0.05 表示不显著，报告中会注明「仅供定性参考」。" }},
+    {{ keys: ["高温异常", "低温异常", "95%", "5%", "分位"], answer: "高温异常：日最高温 ≥ 95% 分位（约 33.6°C），表示该日最高温在历史中偏高。低温异常：日最低温 ≤ 5% 分位（约 8.4°C），表示该日最低温在历史中偏低。报告中有各年异常天数的柱状图。" }},
+    {{ keys: ["2026", "预测", "月均温", "展望"], answer: "2026 年预测基于 2016－2025 年月均值，并叠加线性回归得到的年际趋势（若显著则采用，否则注明不显著、供参考）。「每日温度预测」由月均温插值得到；「冬夏季展望」为定性描述，不替代气象部门预报。" }},
+    {{ keys: ["下载", "表格", "xlsx", "excel"], answer: "点击页面右上角「下载表格数据」可下载 XLSX 表格，内含本报告中的图表数据（如 2025 年逐日、近 10 年、异常天气、2026 预测等），便于在 Excel 中进一步分析。" }},
+    {{ keys: ["怎么用", "如何看", "怎么看", "什么意思"], answer: "报告从上到下依次为：近期天气与预告（今日/昨日/逐时/未来15天）、历史与年度分析（2025 年、近 10 年趋势、异常天气、2026 预测与冬夏季展望）。每个图表悬停可看具体数值。有疑问可以继续问我。" }}
+  ];
+
+  function normalize(s) {{ return (s || "").toLowerCase().replace(/\\s+/g, ""); }}
+  function findAnswer(q) {{
+    var nq = normalize(q);
+    if (!nq) return null;
+    var best = null, bestScore = 0;
+    for (var i = 0; i < faq.length; i++) {{
+      var score = 0;
+      for (var j = 0; j < faq[i].keys.length; j++) {{
+        if (nq.indexOf(normalize(faq[i].keys[j])) !== -1) score++;
+      }}
+      if (score > bestScore) {{ bestScore = score; best = faq[i]; }}
+    }}
+    return best ? best.answer : null;
+  }}
+
+  function addMsg(text, isUser, isLoading) {{
+    var div = document.createElement("div");
+    div.className = "chat-msg " + (isUser ? "user" : "bot");
+    if (isLoading) div.classList.add("loading");
+    var bubble = document.createElement("div");
+    bubble.className = "bubble";
+    bubble.textContent = text;
+    div.appendChild(bubble);
+    messages.appendChild(div);
+    messages.scrollTop = messages.scrollHeight;
+    return div;
+  }}
+
+  var welcome = "你好，我是报告小助手。你可以用自然语言提问，例如：「2025年最热是哪天」「近10年升温多少」「今天适合穿什么」。若已配置大模型接口，我会根据报告数据回答；否则使用预设问答。";
+  var quickQuestions = ["2025年最热是哪天？", "近10年升温趋势怎样？", "什么是高温异常？", "今天适合穿什么？"];
+
+  function showWelcome() {{
+    addMsg(welcome, false);
+    quickQuestions.forEach(function(q) {{
+      var btn = document.createElement("button");
+      btn.type = "button";
+      btn.textContent = q;
+      btn.addEventListener("click", function() {{ input.value = q; form.dispatchEvent(new Event("submit")); }});
+      quick.appendChild(btn);
+    }});
+  }}
+
+  toggle.addEventListener("click", function() {{
+    panel.classList.toggle("open");
+    if (panel.classList.contains("open") && messages.children.length === 0) showWelcome();
+    if (panel.classList.contains("open")) input.focus();
+  }});
+  closeBtn.addEventListener("click", function() {{ panel.classList.remove("open"); }});
+
+  form.addEventListener("submit", function(e) {{
+    e.preventDefault();
+    var q = (input.value || "").trim();
+    if (!q) return;
+    input.value = "";
+    addMsg(q, true);
+
+    if (CHAT_API_URL) {{
+      var loadingEl = addMsg("思考中…", false, true);
+      fetch(CHAT_API_URL, {{
+        method: "POST",
+        headers: {{ "Content-Type": "application/json" }},
+        body: JSON.stringify({{ question: q, reportContext: reportContext }})
+      }})
+        .then(function(r) {{ return r.json(); }})
+        .then(function(data) {{
+          var bubble = loadingEl.querySelector(".bubble");
+          if (bubble) bubble.textContent = data.answer || data.error || "回答生成失败";
+          loadingEl.classList.remove("loading");
+        }})
+        .catch(function() {{
+          var bubble = loadingEl.querySelector(".bubble");
+          if (bubble) bubble.textContent = findAnswer(q) || "网络或服务异常，请稍后重试或检查是否已配置大模型接口。";
+          loadingEl.classList.remove("loading");
+        }});
+    }} else {{
+      setTimeout(function() {{
+        addMsg(findAnswer(q) || "抱歉，没找到相关说明。请配置 CHAT_API_URL 接入大模型后可自然语言查数，或试试：数据从哪来？什么是高温异常？", false);
+      }}, 200);
+    }}
+  }});
+}})();
   </script>
 </body>
 </html>"""
@@ -1268,7 +1468,8 @@ def main():
     print(f"已保存: {json_path}")
 
     html_path = out_dir / "guangzhou_weather_report.html"
-    html = render_html(report)
+    chat_api_url = os.environ.get("CHAT_API_URL", "")
+    html = render_html(report, chat_api_url=chat_api_url)
     # 兼容性：用 HTML 实体代替度数符号，避免编码问题；添加 BOM 便于部分浏览器识别 UTF-8
     # 已统一用 &#176;，此处仅防遗漏
     if "°" in html:

@@ -60,6 +60,35 @@
 
 ---
 
+---
+
+## 智能客服 · 大模型自然语言查数
+
+报告页右下角有**智能客服**，支持用自然语言提问（如「2025年最热哪天」「近10年升温多少」「今天适合穿什么」）。
+
+- **不配置时**：使用内置 FAQ 关键词匹配，回答较固定。
+- **接入大模型后**：回答更自然，可基于报告数据做真实「查数」。
+
+### 接入步骤（推荐用免费 Groq，或 OpenAI）
+
+1. **部署问答接口到 Vercel**
+   - 将本仓库导入 [Vercel](https://vercel.com)（或只部署含 `api/` 的目录）。
+   - **免费方案（推荐）**：在项目 **Settings → Environment Variables** 中新增 `GROQ_API_KEY`。到 [Groq Console](https://console.groq.com) 注册即可免费获取 API Key，无需信用卡。
+   - **付费方案**：若使用 OpenAI，则新增 `OPENAI_API_KEY`（你的 OpenAI API Key）。接口会优先使用 Groq，未配置 Groq 时才用 OpenAI。
+   - 部署后得到域名，如 `https://guangzhou-weather-report.vercel.app`，则问答接口为 `https://guangzhou-weather-report.vercel.app/api/chat`。
+
+2. **让报告页使用该接口**
+   - **方式 A（推荐）**：在 GitHub 仓库 **Settings → Secrets and variables → Actions** 中新增 Secret，名称 `CHAT_API_URL`，值填 `https://你的项目.vercel.app/api/chat`。之后每次 Actions 自动更新报告时，生成的页面都会带上该地址，客服即可使用大模型。
+   - **方式 B**：本地生成报告时在终端执行  
+     `CHAT_API_URL=https://你的项目.vercel.app/api/chat python3 guangzhou_weather_report.py`，再把生成的 `docs/index.html` 提交并推送。
+
+3. **仅用 Vercel 托管报告时**  
+   若把整站部署到 Vercel（根目录设为 `docs`），报告与接口同域，可将 Secret `CHAT_API_URL` 设为 `/api/chat`，生成的页面会请求同站接口，无需填完整 URL。
+
+接口约定：前端对 `/api/chat` 发送 **POST**，Body 为 `{"question": "用户问题", "reportContext": "报告摘要文本"}`，返回 `{"answer": "大模型回答"}`。报告摘要在生成时已写入页面，无需额外配置。
+
+---
+
 ## 注意事项
 
 - 页面通过 CDN 加载 Chart.js 和 XLSX.js，需联网访问。

@@ -29,6 +29,8 @@ jobs:
         run: pip install -r requirements.txt
 
       - name: 生成报告
+        env:
+          CHAT_API_URL: ${{ secrets.CHAT_API_URL }}
         run: python3 guangzhou_weather_report.py
 
       - name: 提交并推送更新

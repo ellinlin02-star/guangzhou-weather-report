@@ -1,0 +1,231 @@
+{
+  "1_概览": {
+    "行数": 3653,
+    "列数": 4,
+    "列名": [
+      "date",
+      "temp_max",
+      "temp_min",
+      "temp_mean"
+    ],
+    "时间范围": {
+      "起始": "2016-01-01",
+      "结束": "2025-12-31"
+    },
+    "dtypes": {
+      "date": "datetime64[ns]",
+      "temp_max": "float64",
+      "temp_min": "float64",
+      "temp_mean": "float64"
+    },
+    "位置": {
+      "纬度": 23.163443,
+      "经度": 113.27749,
+      "时区": "Asia/Shanghai"
+    }
+  },
+  "2_数据质量": {
+    "缺失值": {
+      "date": 0,
+      "temp_max": 0,
+      "temp_min": 0,
+      "temp_mean": 0
+    },
+    "重复行数": 0,
+    "结论": "无缺失、无重复"
+  },
+  "3_描述统计_全量": {
+    "temp_max": {
+      "count": 3653.0,
+      "mean": 26.7,
+      "std": 5.59,
+      "min": 5.3,
+      "25%": 23.1,
+      "50%": 27.9,
+      "75%": 31.1,
+      "max": 38.0
+    },
+    "temp_min": {
+      "count": 3653.0,
+      "mean": 19.58,
+      "std": 6.07,
+      "min": 1.9,
+      "25%": 14.8,
+      "50%": 20.9,
+      "75%": 25.0,
+      "max": 28.5
+    },
+    "temp_mean": {
+      "count": 3653.0,
+      "mean": 22.77,
+      "std": 5.67,
+      "min": 4.1,
+      "25%": 18.7,
+      "50%": 24.1,
+      "75%": 27.5,
+      "max": 32.6
+    }
+  },
+  "3_日温差统计": {
+    "mean": 7.12,
+    "std": 2.41,
+    "min": 0.5,
+    "max": 16.0
+  },
+  "4_按年统计": {
+    "2016": {
+      "temp_max_mean": 26.13,
+      "temp_min_mean": 19.7,
+      "temp_mean_mean": 22.52,
+      "temp_max_max": 36.0,
+      "temp_min_min": 1.9,
+      "days": 366.0
+    },
+    "2017": {
+      "temp_max_mean": 26.02,
+      "temp_min_mean": 19.44,
+      "temp_mean_mean": 22.39,
+      "temp_max_max": 35.5,
+      "temp_min_min": 5.4,
+      "days": 365.0
+    },
+    "2018": {
+      "temp_max_mean": 26.08,
+      "temp_min_mean": 19.14,
+      "temp_mean_mean": 22.29,
+      "temp_max_max": 34.8,
+      "temp_min_min": 3.1,
+      "days": 365.0
+    },
+    "2019": {
+      "temp_max_mean": 27.13,
+      "temp_min_mean": 19.86,
+      "temp_mean_mean": 23.15,
+      "temp_max_max": 35.5,
+      "temp_min_min": 4.8,
+      "days": 365.0
+    },
+    "2020": {
+      "temp_max_mean": 27.1,
+      "temp_min_mean": 19.71,
+      "temp_mean_mean": 23.02,
+      "temp_max_max": 37.9,
+      "temp_min_min": 3.8,
+      "days": 366.0
+    },
+    "2021": {
+      "temp_max_mean": 27.29,
+      "temp_min_mean": 19.87,
+      "temp_mean_mean": 23.23,
+      "temp_max_max": 35.7,
+      "temp_min_min": 3.1,
+      "days": 365.0
+    },
+    "2022": {
+      "temp_max_mean": 26.31,
+      "temp_min_mean": 19.03,
+      "temp_mean_mean": 22.3,
+      "temp_max_max": 37.6,
+      "temp_min_min": 4.4,
+      "days": 365.0
+    },
+    "2023": {
+      "temp_max_mean": 26.8,
+      "temp_min_mean": 19.64,
+      "temp_mean_mean": 22.86,
+      "temp_max_max": 36.8,
+      "temp_min_min": 3.3,
+      "days": 365.0
+    },
+    "2024": {
+      "temp_max_mean": 26.87,
+      "temp_min_mean": 19.82,
+      "temp_mean_mean": 22.93,
+      "temp_max_max": 37.0,
+      "temp_min_min": 2.0,
+      "days": 366.0
+    },
+    "2025": {
+      "temp_max_mean": 27.29,
+      "temp_min_mean": 19.55,
+      "temp_mean_mean": 22.97,
+      "temp_max_max": 38.0,
+      "temp_min_min": 4.5,
+      "days": 365.0
+    }
+  },
+  "5_按月统计_跨年平均": {
+    "1": {
+      "temp_mean_avg": 15.18,
+      "temp_max_avg": 19.61,
+      "temp_min_avg": 11.36
+    },
+    "2": {
+      "temp_mean_avg": 16.03,
+      "temp_max_avg": 20.58,
+      "temp_min_avg": 12.21
+    },
+    "3": {
+      "temp_mean_avg": 19.66,
+      "temp_max_avg": 23.92,
+      "temp_min_avg": 16.12
+    },
+    "4": {
+      "temp_mean_avg": 23.0,
+      "temp_max_avg": 27.14,
+      "temp_min_avg": 19.66
+    },
+    "5": {
+      "temp_mean_avg": 25.89,
+      "temp_max_avg": 29.52,
+      "temp_min_avg": 23.07
+    },
+    "6": {
+      "temp_mean_avg": 27.72,
+      "temp_max_avg": 30.95,
+      "temp_min_avg": 25.32
+    },
+    "7": {
+      "temp_mean_avg": 28.89,
+      "temp_max_avg": 32.42,
+      "temp_min_avg": 26.13
+    },
+    "8": {
+      "temp_mean_avg": 28.13,
+      "temp_max_avg": 31.48,
+      "temp_min_avg": 25.63
+    },
+    "9": {
+      "temp_mean_avg": 27.56,
+      "temp_max_avg": 31.17,
+      "temp_min_avg": 24.75
+    },
+    "10": {
+      "temp_mean_avg": 24.5,
+      "temp_max_avg": 28.43,
+      "temp_min_avg": 21.21
+    },
+    "11": {
+      "temp_mean_avg": 20.59,
+      "temp_max_avg": 24.72,
+      "temp_min_avg": 17.17
+    },
+    "12": {
+      "temp_mean_avg": 15.7,
+      "temp_max_avg": 20.18,
+      "temp_min_avg": 11.93
+    }
+  },
+  "6_极值记录": {
+    "最高温日": {
+      "date": "2025-09-05",
+      "temp_max": 38.0,
+      "temp_min": 27.4
+    },
+    "最低温日": {
+      "date": "2016-01-25",
+      "temp_max": 9.8,
+      "temp_min": 1.9
+    }
+  }
+}
