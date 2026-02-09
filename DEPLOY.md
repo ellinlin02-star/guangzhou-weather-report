@@ -42,7 +42,18 @@
 
 ---
 
-## 更新报告后
+## 自动更新（GitHub Pages 推荐）
+
+仓库已配置 **GitHub Actions**，报告会**自动更新**，分享的链接始终是最新数据：
+
+- **定时**：每天北京时间上午 10:00 自动生成报告并推送到仓库，Pages 会随之更新。
+- **手动**：在 GitHub 仓库 → **Actions** → 选择「更新天气报告」→ **Run workflow**，可立即触发一次更新。
+
+无需自己再运行脚本或手动 push，[https://ellinlin02-star.github.io/guangzhou-weather-report/](https://ellinlin02-star.github.io/guangzhou-weather-report/) 会保持更新。
+
+---
+
+## 更新报告后（手动时）
 
 - **GitHub Pages**：改完代码或重新运行 `python3 guangzhou_weather_report.py` 后，把 `docs/index.html` 的变更提交并 `git push`，Pages 会自动更新。
 - **Netlify 拖拽**：重新拖拽一次 `docs` 文件夹即可覆盖旧版本。

@@ -1,0 +1,2 @@
+# 广州天气报告脚本依赖（本地与 GitHub Actions 共用）
+pandas>=1.0

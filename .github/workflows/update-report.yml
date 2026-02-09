@@ -1,0 +1,40 @@
+# 定时生成广州天气报告并推送，使 GitHub Pages 自动更新
+# 页面：https://ellinlin02-star.github.io/guangzhou-weather-report/
+
+name: 更新天气报告
+
+on:
+  schedule:
+    # 每天 UTC 2:00 运行（北京时间 10:00）
+    - cron: "0 2 * * *"
+  workflow_dispatch:
+    # 支持在 Actions 页手动点击 Run workflow 立即更新
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write  # 允许推送提交
+
+    steps:
+      - name: 检出仓库
+        uses: actions/checkout@v4
+
+      - name: 设置 Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: 安装依赖
+        run: pip install -r requirements.txt
+
+      - name: 生成报告
+        run: python3 guangzhou_weather_report.py
+
+      - name: 提交并推送更新
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add docs/index.html guangzhou_weather_report.html guangzhou_weather_report_data.json
+          git diff --staged --quiet || git commit -m "chore: 自动更新天气报告 [$(date -u +%Y-%m-%d)]"
+          git push
