@@ -3,7 +3,7 @@
     "title": "广州天气数据报告",
     "period": "2016-01-01 至 2025-12-31",
     "location": "广州（约 23.13°N, 113.26°E）",
-    "generated": "2026-02-09 11:19"
+    "generated": "2026-02-10 06:17"
   },
   "year_2025": {
     "days": 365,
@@ -2416,16 +2416,6 @@
       "temp_max_mean": 26.7,
       "temp_min_mean": 19.58,
       "temp_mean_mean": 22.77
-    },
-    "trend_test": {
-      "slope_per_year": 0.0505,
-      "stderr": 0.03772840451022347,
-      "p_value": 0.21714438100316105,
-      "ci_low": -0.0365,
-      "ci_high": 0.1375,
-      "significant": false,
-      "trend_01_in_ci": true,
-      "r_squared": 0.1832
     }
   },
   "abnormal": {
@@ -4359,23 +4349,23 @@
     }
   },
   "predict_2026": {
-    "method": "基于 2016-2025 年月均值，叠加线性回归估计的年际趋势：β = 0.051°C/年，95% CI [-0.036, 0.138]，p = 0.217（不显著，预测中仍采用该估计值供参考）。",
+    "method": "基于 2016-2025 年月均值，并叠加约 +0.1°C 年际升温趋势（参考值；未做回归估计）。",
     "by_month": {
       "1": {
         "month_name": "1月",
-        "temp_mean": 15.2,
+        "temp_mean": 15.3,
         "temp_max": 19.7,
-        "temp_min": 11.4
+        "temp_min": 11.5
       },
       "2": {
         "month_name": "2月",
         "temp_mean": 16.1,
-        "temp_max": 20.6,
+        "temp_max": 20.7,
         "temp_min": 12.3
       },
       "3": {
         "month_name": "3月",
-        "temp_mean": 19.7,
+        "temp_mean": 19.8,
         "temp_max": 24.0,
         "temp_min": 16.2
       },
@@ -4383,37 +4373,37 @@
         "month_name": "4月",
         "temp_mean": 23.1,
         "temp_max": 27.2,
-        "temp_min": 19.7
+        "temp_min": 19.8
       },
       "5": {
         "month_name": "5月",
-        "temp_mean": 25.9,
+        "temp_mean": 26.0,
         "temp_max": 29.6,
-        "temp_min": 23.1
+        "temp_min": 23.2
       },
       "6": {
         "month_name": "6月",
         "temp_mean": 27.8,
-        "temp_max": 31.0,
+        "temp_max": 31.1,
         "temp_min": 25.4
       },
       "7": {
         "month_name": "7月",
-        "temp_mean": 28.9,
+        "temp_mean": 29.0,
         "temp_max": 32.5,
         "temp_min": 26.2
       },
       "8": {
         "month_name": "8月",
         "temp_mean": 28.2,
-        "temp_max": 31.5,
+        "temp_max": 31.6,
         "temp_min": 25.7
       },
       "9": {
         "month_name": "9月",
-        "temp_mean": 27.6,
-        "temp_max": 31.2,
-        "temp_min": 24.8
+        "temp_mean": 27.7,
+        "temp_max": 31.3,
+        "temp_min": 24.9
       },
       "10": {
         "month_name": "10月",
@@ -4423,19 +4413,19 @@
       },
       "11": {
         "month_name": "11月",
-        "temp_mean": 20.6,
+        "temp_mean": 20.7,
         "temp_max": 24.8,
-        "temp_min": 17.2
+        "temp_min": 17.3
       },
       "12": {
         "month_name": "12月",
         "temp_mean": 15.8,
-        "temp_max": 20.2,
+        "temp_max": 20.3,
         "temp_min": 12.0
       }
     },
-    "trend_offset_per_year": 0.0505,
-    "trend_from_regression": true
+    "trend_offset_per_year": 0.1,
+    "trend_from_regression": false
   },
   "outlook_2026": {
     "winter": "接近常年，偏暖或偏冷幅度不大",
@@ -4443,112 +4433,112 @@
     "note": "以上基于 2016-2025 年月度统计与简单趋势，仅供参考，不替代气象部门预报。"
   },
   "today_weather": {
-    "date": "2026-02-09",
-    "temp_min": 10.3,
-    "temp_max": 16.3,
+    "date": "2026-02-10",
+    "temp_min": 14.7,
+    "temp_max": 18.8,
     "advice": "早晚偏凉，建议穿长袖或薄外套。"
   },
   "yesterday_weather": {
-    "date": "2026-02-08",
-    "temp_min": 10.7,
-    "temp_max": 16.2
+    "date": "2026-02-09",
+    "temp_min": 8.6,
+    "temp_max": 18.9
   },
   "forecast_15d": [
     {
-      "date": "2026-02-09",
-      "temp_max": 16.3,
-      "temp_min": 10.3,
-      "temp_mean": 13.1
-    },
-    {
       "date": "2026-02-10",
       "temp_max": 18.8,
-      "temp_min": 13.2,
-      "temp_mean": 15.6
+      "temp_min": 14.7,
+      "temp_mean": 16.4
     },
     {
       "date": "2026-02-11",
-      "temp_max": 24.6,
-      "temp_min": 15.7,
-      "temp_mean": 19.4
+      "temp_max": 22.4,
+      "temp_min": 15.5,
+      "temp_mean": 17.9
     },
     {
       "date": "2026-02-12",
-      "temp_max": 24.5,
-      "temp_min": 17.6,
-      "temp_mean": 20.2
+      "temp_max": 24.2,
+      "temp_min": 16.1,
+      "temp_mean": 19.4
     },
     {
       "date": "2026-02-13",
-      "temp_max": 25.2,
+      "temp_max": 24.7,
       "temp_min": 16.5,
-      "temp_mean": 20.4
+      "temp_mean": 20.0
     },
     {
       "date": "2026-02-14",
       "temp_max": 27.3,
-      "temp_min": 16.9,
-      "temp_mean": 21.8
-    },
-    {
-      "date": "2026-02-15",
-      "temp_max": 27.9,
-      "temp_min": 18.2,
-      "temp_mean": 22.5
-    },
-    {
-      "date": "2026-02-16",
-      "temp_max": 28.1,
-      "temp_min": 19.3,
-      "temp_mean": 23.4
-    },
-    {
-      "date": "2026-02-17",
-      "temp_max": 24.1,
-      "temp_min": 18.3,
+      "temp_min": 16.2,
       "temp_mean": 21.2
     },
     {
-      "date": "2026-02-18",
-      "temp_max": 25.3,
-      "temp_min": 19.6,
+      "date": "2026-02-15",
+      "temp_max": 27.5,
+      "temp_min": 17.5,
       "temp_mean": 22.0
     },
     {
+      "date": "2026-02-16",
+      "temp_max": 26.8,
+      "temp_min": 18.1,
+      "temp_mean": 21.9
+    },
+    {
+      "date": "2026-02-17",
+      "temp_max": 23.7,
+      "temp_min": 15.0,
+      "temp_mean": 19.3
+    },
+    {
+      "date": "2026-02-18",
+      "temp_max": 26.4,
+      "temp_min": 19.8,
+      "temp_mean": 22.2
+    },
+    {
       "date": "2026-02-19",
-      "temp_max": 27.8,
-      "temp_min": 22.3,
-      "temp_mean": 24.4
+      "temp_max": 23.7,
+      "temp_min": 19.3,
+      "temp_mean": 21.1
     },
     {
       "date": "2026-02-20",
-      "temp_max": 23.6,
-      "temp_min": 11.6,
-      "temp_mean": 16.1
+      "temp_max": 24.7,
+      "temp_min": 19.1,
+      "temp_mean": 21.6
     },
     {
       "date": "2026-02-21",
-      "temp_max": 11.3,
-      "temp_min": 9.6,
-      "temp_mean": 10.1
+      "temp_max": 25.5,
+      "temp_min": 18.1,
+      "temp_mean": 21.6
     },
     {
       "date": "2026-02-22",
-      "temp_max": 19.7,
-      "temp_min": 10.1,
-      "temp_mean": 14.6
+      "temp_max": 27.7,
+      "temp_min": 21.2,
+      "temp_mean": 24.0
     },
     {
       "date": "2026-02-23",
-      "temp_max": 20.2,
-      "temp_min": 16.5,
-      "temp_mean": 18.1
+      "temp_max": 27.8,
+      "temp_min": 20.6,
+      "temp_mean": 23.7
     },
     {
       "date": "2026-02-24",
-      "temp_max": 19.5,
-      "temp_min": 17.2,
-      "temp_mean": 18.2
+      "temp_max": 22.0,
+      "temp_min": 16.8,
+      "temp_mean": 20.2
+    },
+    {
+      "date": "2026-02-25",
+      "temp_max": 15.3,
+      "temp_min": 8.7,
+      "temp_mean": 10.5
     }
   ]
 }
