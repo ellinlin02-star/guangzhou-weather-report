@@ -3,7 +3,7 @@
     "title": "广州天气数据报告",
     "period": "2016-01-01 至 2025-12-31",
     "location": "广州（约 23.13°N, 113.26°E）",
-    "generated": "2026-07-03 06:16"
+    "generated": "2026-07-04 05:51"
   },
   "year_2025": {
     "days": 365,
@@ -4482,9 +4482,113 @@
     "summer": "极端高温风险接近常年水平",
     "note": "以上基于 2016-2025 年月度统计与简单趋势，仅供参考，不替代气象部门预报。"
   },
+  "today_weather": {
+    "date": "2026-07-04",
+    "temp_min": 25.1,
+    "temp_max": 27.9,
+    "advice": "气温适宜，早晚可加薄外套，注意增减衣物。"
+  },
   "yesterday_weather": {
-    "date": "2026-07-02",
-    "temp_min": 26.2,
-    "temp_max": 33.6
-  }
+    "date": "2026-07-03",
+    "temp_min": 26.1,
+    "temp_max": 32.2
+  },
+  "forecast_15d": [
+    {
+      "date": "2026-07-04",
+      "temp_max": 27.9,
+      "temp_min": 25.1,
+      "temp_mean": 26.1
+    },
+    {
+      "date": "2026-07-05",
+      "temp_max": 30.7,
+      "temp_min": 24.2,
+      "temp_mean": 27.1
+    },
+    {
+      "date": "2026-07-06",
+      "temp_max": 30.8,
+      "temp_min": 24.7,
+      "temp_mean": 27.4
+    },
+    {
+      "date": "2026-07-07",
+      "temp_max": 30.7,
+      "temp_min": 26.0,
+      "temp_mean": 27.5
+    },
+    {
+      "date": "2026-07-08",
+      "temp_max": 28.5,
+      "temp_min": 25.0,
+      "temp_mean": 26.7
+    },
+    {
+      "date": "2026-07-09",
+      "temp_max": 30.3,
+      "temp_min": 24.4,
+      "temp_mean": 27.1
+    },
+    {
+      "date": "2026-07-10",
+      "temp_max": 33.8,
+      "temp_min": 25.9,
+      "temp_mean": 29.4
+    },
+    {
+      "date": "2026-07-11",
+      "temp_max": 35.9,
+      "temp_min": 27.0,
+      "temp_mean": 30.9
+    },
+    {
+      "date": "2026-07-12",
+      "temp_max": 34.6,
+      "temp_min": 27.1,
+      "temp_mean": 29.8
+    },
+    {
+      "date": "2026-07-13",
+      "temp_max": 29.3,
+      "temp_min": 25.7,
+      "temp_mean": 27.2
+    },
+    {
+      "date": "2026-07-14",
+      "temp_max": 26.7,
+      "temp_min": 25.1,
+      "temp_mean": 25.9
+    },
+    {
+      "date": "2026-07-15",
+      "temp_max": 26.3,
+      "temp_min": 24.7,
+      "temp_mean": 25.5
+    },
+    {
+      "date": "2026-07-16",
+      "temp_max": 27.1,
+      "temp_min": 23.9,
+      "temp_mean": 25.6
+    },
+    {
+      "date": "2026-07-17",
+      "temp_max": 30.0,
+      "temp_min": 25.6,
+      "temp_mean": 27.1
+    },
+    {
+      "date": "2026-07-18",
+      "temp_max": 33.3,
+      "temp_min": 25.5,
+      "temp_mean": 28.8
+    },
+    {
+      "date": "2026-07-19",
+      "temp_max": 37.7,
+      "temp_min": 28.3,
+      "temp_mean": 32.8
+    }
+  ]
 }
